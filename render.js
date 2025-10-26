@@ -1,6 +1,5 @@
 // render.js — build a live SVG for an airport station using NWS API
 // Usage in GH Actions: STATION=KGOK RUNWAYS="160,340" node render.js
-// If RUNWAYS is omitted, runway recommendation is hidden (useful for other fields).
 // Node 18+/20+ has global fetch.
 
 const fs = require("fs");
@@ -9,13 +8,14 @@ const STATION = (process.env.STATION || "KGOK").toUpperCase();
 const RUNWAYS = (process.env.RUNWAYS || "").trim(); // e.g., "160,340"
 const OUTFILE = `${STATION.toLowerCase()}.svg`;
 
-// color helpers (same palette you liked)
+// ---- Color helpers ----
 const cTemp = (t) => (t==null) ? "#ffffff"
   : (t<=32? "#00b0ff" : t<=60? "#4fc3f7" : t<=80? "#4caf50" : t<=95? "#ffb300" : "#ff5252");
 const cWind = (k) => (k<1? "#4caf50" : k<=5? "#4caf50" : k<=15? "#ffb300" : "#ff5252");
 const cX = (x) => (x>=15? "#ff5252" : x>=8? "#ffb300" : "#4caf50");
 const cT = (t) => (t>5? "#ff5252" : t>3? "#ffb300" : "#4caf50");
 
+// ---- Wind + runway math ----
 function toCardinal(deg){
   if (deg==null || isNaN(deg)) return "";
   const d=["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW","N"];
@@ -49,18 +49,18 @@ function clouds(layers){
   return out.join(" ");
 }
 
+// ---- Main builder ----
 (async function main(){
   const url = `https://api.weather.gov/stations/${STATION}/observations/latest`;
   const res = await fetch(url, {
     headers: {
-      // NWS requires a unique User-Agent with contact info
       "User-Agent": `(airport-station-weather-reports/${STATION}, contact: github.com/jacksonsp117)`
     }
   });
   const j = await res.json();
   const p = j && j.properties ? j.properties : {};
 
-  // core values
+  // Core weather data
   const tempC = p.temperature && typeof p.temperature.value==="number" ? p.temperature.value : null;
   const tempF = tempC!=null ? Math.round((tempC*9/5)+32) : null;
 
@@ -79,15 +79,20 @@ function clouds(layers){
   const altInHg = baroPa ? (baroPa/3386.389).toFixed(2) : "";
 
   const ts = p.timestamp ? new Date(p.timestamp) : new Date();
+
+  // --- Zulu and CST time ---
   const hh = String(ts.getUTCHours()).padStart(2,"0");
   const mm = String(ts.getUTCMinutes()).padStart(2,"0");
-  const zTime = `${hh}:${mm}Z`; // always Zulu for universal clarity
+  const zTime = `${hh}:${mm}Z`;
+
+  const cstOptions = { timeZone: "America/Chicago", hour12: false, hour: "2-digit", minute: "2-digit" };
+  const cstTime = new Intl.DateTimeFormat("en-US", cstOptions).format(ts);
 
   const desc = p.textDescription || "N/A";
   const isCalm = (windKt < 1 || windDir==null);
   const windText = isCalm ? "Calm" : `${windDir}° ${windCard?`(${windCard}) `:""}${Math.round(windKt)} kt`;
 
-  // runway logic if RUNWAYS provided (e.g., "160,340")
+  // Runway logic
   let runwayText = "";
   if (!isCalm && RUNWAYS){
     const [rA, rB] = RUNWAYS.split(",").map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n));
@@ -107,13 +112,13 @@ function clouds(layers){
     runwayText = `<tspan fill="#4caf50" font-weight="700">Preferred: Either (calm)</tspan>`;
   }
 
-  // colors
+  // Colors
   const tempColor = cTemp(tempF);
   const windColor = cWind(windKt);
 
-  // Compose a single-line text (SVG)
+  // ---- Assemble the text line ----
   const parts = [
-    `${STATION} • ${zTime}`,
+    `${STATION} • ${zTime} / ${cstTime} CST`,
     `<tspan fill="#81d4fa">${cloudStr}</tspan>`,
     `<tspan fill="${tempColor}">${tempF!=null? tempF : "–"}°F</tspan>`,
     `<tspan fill="${windColor}">Wind ${windText}</tspan>`,
@@ -121,12 +126,12 @@ function clouds(layers){
     runwayText
   ].filter(Boolean);
 
-  // Measure? We’ll just use a wide viewBox to be safe
+  // ---- SVG output ----
   const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="80" viewBox="0 0 1200 42">
-  <rect x="0" y="0" width="1200" height="42" fill="#000"/>
-  <g font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="14" font-weight="600">
-    <text x="12" y="26" fill="#fff">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="60" viewBox="0 0 1200 60">
+  <rect x="0" y="0" width="1200" height="60" fill="#000"/>
+  <g font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="16" font-weight="600">
+    <text x="12" y="38" fill="#fff">
       ${parts.join(' • ')}
     </text>
   </g>
@@ -135,4 +140,3 @@ function clouds(layers){
   fs.writeFileSync(OUTFILE, svg);
   console.log(`Wrote ${OUTFILE}`);
 })();
-
