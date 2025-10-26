@@ -15,6 +15,14 @@ const cWind = (k) => (k<1? "#4caf50" : k<=5? "#4caf50" : k<=15? "#ffb300" : "#ff
 const cX = (x) => (x>=15? "#ff5252" : x>=8? "#ffb300" : "#4caf50");
 const cT = (t) => (t>5? "#ff5252" : t>3? "#ffb300" : "#4caf50");
 
+// Flight rules colors (standard convention)
+const FLT_COLORS = {
+  VFR:  "#00e676", // green
+  MVFR: "#1e88e5", // blue
+  IFR:  "#e53935", // red
+  LIFR: "#9c27b0"  // magenta
+};
+
 // ---- Wind + runway math ----
 function toCardinal(deg){
   if (deg==null || isNaN(deg)) return "";
@@ -32,6 +40,8 @@ function pickRunway(r16,r34){
   if (Math.abs(r16.h - r34.h) > 2) return r16.h > r34.h ? "16" : "34";
   return r16.x <= r34.x ? "16" : "34";
 }
+
+// ---- Clouds / Ceiling / Flight Category ----
 function clouds(layers){
   if (!layers || !layers.length) return "SKC";
   const out=[];
@@ -43,13 +53,55 @@ function clouds(layers){
     if (amt==="FEW")       amt="FEW";
     if (amt==="CLEAR")     amt="CLR";
     amt = amt.slice(0,3);
-    const base = (L.base && typeof L.base.value==="number") ? Math.round(L.base.value/0.3048/100) : null;
+    const base = (L.base && typeof L.base.value==="number") ? Math.round(L.base.value/0.3048/100) : null; // hundreds ft
     out.push(amt + (base? String(base).padStart(3,"0") : "///"));
   }
   return out.join(" ");
 }
 
-// ---- Main builder ----
+// Determine ceiling (ft AGL) from lowest BKN/OVC layer; returns null if none
+function ceilingFt(layers){
+  if (!layers || !layers.length) return null;
+  let ceil = null;
+  for (const L of layers){
+    let amt = (L.amount || "").toUpperCase();
+    if (amt==="BROKEN" || amt==="OVERCAST" || amt==="BKN" || amt==="OVC"){
+      const baseM = (L.base && typeof L.base.value==="number") ? L.base.value : null;
+      if (baseM!=null){
+        const ft = baseM / 0.3048;
+        if (ceil==null || ft < ceil) ceil = ft;
+      }
+    }
+    // If NWS ever sends vertical visibility (VV), treat like an overcast ceiling:
+    if (amt==="VV"){
+      const baseM = (L.base && typeof L.base.value==="number") ? L.base.value : null;
+      if (baseM!=null){
+        const ft = baseM / 0.3048;
+        if (ceil==null || ft < ceil) ceil = ft;
+      }
+    }
+  }
+  return ceil==null ? null : Math.round(ceil);
+}
+
+// Compute FAA flight category: LIFR / IFR / MVFR / VFR
+// Rules:
+//   LIFR: ceil < 500 ft OR vis < 1 sm
+//   IFR:  ceil 500–<1000 OR vis 1–<3 sm
+//   MVFR: ceil 1000–<3000 OR vis 3–<5 sm
+//   VFR:  ceil >=3000 AND vis >=5 sm
+function flightCategory(ceilFt, visSm){
+  // If one is missing, base on the other if available
+  const vis = (typeof visSm === "number") ? visSm : null;
+  const ceil = (typeof ceilFt === "number") ? ceilFt : null;
+
+  if ((ceil!=null && ceil < 500) || (vis!=null && vis < 1)) return { cat: "LIFR", color: FLT_COLORS.LIFR };
+  if ((ceil!=null && ceil < 1000) || (vis!=null && vis < 3)) return { cat: "IFR",  color: FLT_COLORS.IFR  };
+  if ((ceil!=null && ceil < 3000) || (vis!=null && vis < 5)) return { cat: "MVFR", color: FLT_COLORS.MVFR };
+  if (ceil==null && vis==null) return { cat: "VFR", color: FLT_COLORS.VFR }; // assume best if nothing reported
+  return { cat: "VFR", color: FLT_COLORS.VFR };
+}
+
 (async function main(){
   const url = `https://api.weather.gov/stations/${STATION}/observations/latest`;
   const res = await fetch(url, {
@@ -71,8 +123,19 @@ function clouds(layers){
   const windDir = wd_raw!=null ? Math.round(wd_raw) : null;
   const windCard = windDir!=null ? toCardinal(windDir) : "";
 
-  const cloudStr = clouds(p.cloudLayers);
+  // Visibility in statute miles (if reported)
+  // NWS visibility is meters; convert: 1 sm = 1609.34 m
+  const visM = p.visibility && typeof p.visibility.value==="number" ? p.visibility.value : null;
+  const visSm = visM!=null ? (visM / 1609.34) : null;
 
+  // Clouds and ceiling
+  const cloudStr = clouds(p.cloudLayers);
+  const ceilFeet = ceilingFt(p.cloudLayers);
+
+  // Flight category
+  const { cat: fltCat, color: fltColor } = flightCategory(ceilFeet, visSm);
+
+  // Altimeter (barometricPressure preferred; fallback to seaLevelPressure)
   let baroPa = null;
   if (p.barometricPressure && typeof p.barometricPressure.value==="number") baroPa = p.barometricPressure.value;
   else if (p.seaLevelPressure && typeof p.seaLevelPressure.value==="number") baroPa = p.seaLevelPressure.value;
@@ -88,7 +151,6 @@ function clouds(layers){
   const cstOptions = { timeZone: "America/Chicago", hour12: false, hour: "2-digit", minute: "2-digit" };
   const cstTime = new Intl.DateTimeFormat("en-US", cstOptions).format(ts);
 
-  const desc = p.textDescription || "N/A";
   const isCalm = (windKt < 1 || windDir==null);
   const windText = isCalm ? "Calm" : `${windDir}° ${windCard?`(${windCard}) `:""}${Math.round(windKt)} kt`;
 
@@ -116,21 +178,27 @@ function clouds(layers){
   const tempColor = cTemp(tempF);
   const windColor = cWind(windKt);
 
+  // Flight rules details text (ceil/vis)
+  const ceilTxt = (ceilFeet!=null) ? `${Math.round(ceilFeet)} ft` : "—";
+  const visTxt = (visSm!=null) ? `${visSm.toFixed(visSm<10 ? 1 : 0)} sm` : "—";
+  const fltText = `<tspan fill="${fltColor}" font-weight="700">${fltCat}</tspan> <tspan opacity="0.85">(ceil ${ceilTxt}, vis ${visTxt})</tspan>`;
+
   // ---- Assemble the text line ----
   const parts = [
     `${STATION} • ${zTime} / ${cstTime} CST`,
     `<tspan fill="#81d4fa">${cloudStr}</tspan>`,
     `<tspan fill="${tempColor}">${tempF!=null? tempF : "–"}°F</tspan>`,
     `<tspan fill="${windColor}">Wind ${windText}</tspan>`,
+    fltText,
     `Altimeter ${altInHg? altInHg+" inHg" : "—"}`,
     runwayText
   ].filter(Boolean);
 
   // ---- SVG output ----
   const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="60" viewBox="0 0 1200 60">
-  <rect x="0" y="0" width="1200" height="60" fill="#000"/>
-  <g font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="16" font-weight="600">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="80" viewBox="0 0 1200 60">
+  <rect x="0" y="0" width="1200" height="80" fill="#000"/>
+  <g font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="24" font-weight="600">
     <text x="12" y="38" fill="#fff">
       ${parts.join(' • ')}
     </text>
