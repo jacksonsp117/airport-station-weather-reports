@@ -123,7 +123,7 @@ function clouds(layers){
 
   // Measure? We’ll just use a wide viewBox to be safe
   const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="42" viewBox="0 0 1200 42">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="80" viewBox="0 0 1200 42">
   <rect x="0" y="0" width="1200" height="42" fill="#000"/>
   <g font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="14" font-weight="600">
     <text x="12" y="26" fill="#fff">
@@ -135,3 +135,4 @@ function clouds(layers){
   fs.writeFileSync(OUTFILE, svg);
   console.log(`Wrote ${OUTFILE}`);
 })();
+
