@@ -1,0 +1,38 @@
+name: Build SVG tickers
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"   # every 15 minutes
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Add more stations here later if you like
+          - station: KGOK
+            runways: "160,340"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Generate SVG for ${{ matrix.station }}
+        env:
+          STATION: ${{ matrix.station }}
+          RUNWAYS: ${{ matrix.runways }}
+        run: node render.js
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Auto-update SVG for ${GITHUB_SHA:0:7} at $(date -u +'%Y-%m-%d %H:%MZ')" || echo "No changes"
+          git push
