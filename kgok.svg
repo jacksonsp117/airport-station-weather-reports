@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="80" viewBox="0 0 1200 42">
-  <rect x="0" y="0" width="1200" height="42" fill="#000"/>
-  <g font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="14" font-weight="600">
-    <text x="12" y="26" fill="#fff">
-      KGOK • 05:15Z • <tspan fill="#81d4fa">BKN002 BKN014</tspan> • <tspan fill="#4fc3f7">54°F</tspan> • <tspan fill="#4caf50">Wind Calm</tspan> • Altimeter 29.96 inHg • <tspan fill="#4caf50" font-weight="700">Preferred: Either (calm)</tspan>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="60" viewBox="0 0 1200 60">
+  <rect x="0" y="0" width="1200" height="60" fill="#000"/>
+  <g font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="16" font-weight="600">
+    <text x="12" y="38" fill="#fff">
+      KGOK • 05:20Z / 24:20 CST • <tspan fill="#81d4fa">VV002</tspan> • <tspan fill="#4fc3f7">54°F</tspan> • <tspan fill="#4caf50">Wind Calm</tspan> • Altimeter 29.96 inHg • <tspan fill="#4caf50" font-weight="700">Preferred: Either (calm)</tspan>
     </text>
   </g>
 </svg>
