@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Airport Station Weather Reports</title>
+<style>
+  html,body{margin:0;padding:0;background:transparent}
+  #wrap{overflow:hidden;white-space:nowrap;width:100%;background:#000;color:#fff;padding:.4em 0;border-radius:1em;font:600 14px system-ui,Segoe UI,Roboto,Arial,sans-serif}
+  #ticker{display:inline-block}
+  @keyframes tickerScroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+  #wrap:hover #ticker{animation-play-state:paused}
+  .sep{color:#ffb300;padding:0 .4rem}
+</style>
+</head>
+<body>
+<div id="wrap" aria-live="polite">
+  <div id="ticker">Loading station weather…</div>
+</div>
+
+<script>
+(function(){
+  const params = new URLSearchParams(window.location.search);
+  const station = (params.get("station") || "KGOK").toUpperCase();
+
+  function toCardinal(deg){if(deg==null||isNaN(deg))return"";var d=["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW","N"];return d[Math.round(deg/22.5)];}
+  function norm(a){return((a%360)+360)%360;}
+  function comps(rwy,dir,spd){if(dir==null||isNaN(dir)||!spd)return{h:0,x:0};var rel=norm(dir-rwy);if(rel>180)rel-=360;if(rel<-180)rel+=360;var rad=rel*Math.PI/180;return{h:spd*Math.cos(rad),x:Math.abs(spd*Math.sin(rad))};}
+  function cTemp(t){if(t==null)return"#fff";if(t<=32)return"#00b0ff";if(t<=60)return"#4fc3f7";if(t<=80)return"#4caf50";if(t<=95)return"#ffb300";return"#ff5252";}
+  function cWind(k){if(k<1)return"#4caf50";if(k<=5)return"#4caf50";if(k<=15)return"#ffb300";return"#ff5252";}
+  function cX(x){if(x>=15)return"#ff5252";if(x>=8)return"#ffb300";return"#4caf50";}
+  function cT(t){if(t>5)return"#ff5252";if(t>3)return"#ffb300";return"#4caf50";}
+  function pick(r16,r34){if(Math.abs(r16.h-r34.h)>2)return r16.h>r34.h?"16":"34";return r16.x<=r34.x?"16":"34";}
+  function clouds(l){if(!l||!l.length)return"SKC";var o=[];for(var i=0;i<l.length;i++){var a=l[i].amount||"",A=a.toUpperCase();if(A==="SCATTERED")A="SCT";if(A==="BROKEN")A="BKN";if(A==="OVERCAST")A="OVC";if(A==="FEW")A="FEW";if(A==="CLEAR")A="CLR";A=A.slice(0,3);var b=l[i].base&&typeof l[i].base.value==="number"?Math.round(l[i].base.value/0.3048/100):null;o.push(A+(b?("0"+b).slice(-3):"///"));}return o.join(" ");}
+  function start(){var el=document.getElementById("ticker");if(!el)return;if(el.getAttribute("dup")!=="1"){el.innerHTML="<span>"+el.innerHTML+"</span><span class='sep'>| *REPEATS* |</span><span>"+el.innerHTML+"</span>";el.setAttribute("dup","1");}el.style.animation="none";el.style.transform="translateX(0)";setTimeout(function(){var dur=Math.max(12,Math.round((el.offsetWidth/2)/60));el.style.willChange="transform";el.style.animation="tickerScroll "+dur+"s linear infinite";},0);}
+  function update(){
+    fetch("https://api.weather.gov/stations/"+station+"/observations/latest")
+    .then(r=>r.json())
+    .then(d=>{
+      var p=d.properties||{},tempC=p.temperature&&typeof p.temperature.value==="number"?p.temperature.value:null,tempF=tempC!=null?Math.round((tempC*9/5)+32):null,ws=p.windSpeed&&typeof p.windSpeed.value==="number"?p.windSpeed.value:0,wKt=ws*1.94384,wd=p.windDirection&&typeof p.windDirection.value==="number"?Math.round(p.windDirection.value):null,wCard=wd!=null?toCardinal(wd):"",isCalm=wKt<1||wd==null,cloud=clouds(p.cloudLayers),baro=null;if(p.barometricPressure&&typeof p.barometricPressure.value==="number")baro=p.barometricPressure.value;else if(p.seaLevelPressure&&typeof p.seaLevelPressure.value==="number")baro=p.seaLevelPressure.value;var alt=baro?(baro/3386.389).toFixed(2):"",ts=p.timestamp?new Date(p.timestamp):new Date(),time=ts.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      var windC=cWind(wKt),windTxt=isCalm?"Calm":wd+"° "+(wCard?"("+wCard+") ":"")+Math.round(wKt)+" kt";
+      var r16=comps(160,wd,wKt),r34=comps(340,wd,wKt),pref,html;
+      if(isCalm){pref="<span style='color:#4caf50;font-weight:800'>Preferred: Either (calm)</span>";}
+      else{var rw=pick(r16,r34),r=rw==="16"?r16:r34,tail=r.h<0?Math.round(Math.abs(r.h)):0;xC=cX(r.x);tC=cT(tail);pref="<span style='color:"+xC+";font-weight:800'>Preferred: RWY "+rw+"</span> <span style='opacity:.85'>("+(tail?"<span style='color:"+tC+"'>TW "+tail+" kt</span>":"HW "+Math.round(Math.max(0,r.h))+" kt")+", XW "+Math.round(r.x)+" kt)</span>";}
+      html=station+" • "+time+" • <span style='color:#81d4fa'>"+cloud+"</span> • <span style='color:"+cTemp(tempF)+"'>"+(tempF!=null?tempF:"–")+"°F</span> • <span style='color:"+windC+"'>Wind "+windTxt+"</span> • Altimeter "+(alt?alt+" inHg":"—")+" • "+pref;
+      var el=document.getElementById("ticker");el.setAttribute("dup","0");el.innerHTML=html;start();
+    })
+    .catch(()=>{document.getElementById("ticker").textContent="Weather unavailable.";});
+  }
+  update();setInterval(update,600000);window.addEventListener("resize",start);
+})();
+</script>
+</body>
+</html>
