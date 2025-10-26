@@ -8,6 +8,11 @@ const STATION = (process.env.STATION || "KGOK").toUpperCase();
 const RUNWAYS = (process.env.RUNWAYS || "").trim(); // e.g., "160,340"
 const OUTFILE = `${STATION.toLowerCase()}.svg`;
 
+// ---------- TUNABLE DISPLAY PRESETS ----------
+const BASE_WIDTH  = 1600; // canvas width in px (can auto-widen below)
+const BASE_HEIGHT = 80;   // canvas height in px (matches viewBox)
+const BASE_FONT   = 24;   // default font size for one-line banner
+
 // ---- Color helpers ----
 const cTemp = (t) => (t==null) ? "#ffffff"
   : (t<=32? "#00b0ff" : t<=60? "#4fc3f7" : t<=80? "#4caf50" : t<=95? "#ffb300" : "#ff5252");
@@ -15,7 +20,7 @@ const cWind = (k) => (k<1? "#4caf50" : k<=5? "#4caf50" : k<=15? "#ffb300" : "#ff
 const cX = (x) => (x>=15? "#ff5252" : x>=8? "#ffb300" : "#4caf50");
 const cT = (t) => (t>5? "#ff5252" : t>3? "#ffb300" : "#4caf50");
 
-// Flight rules colors (standard convention)
+// Flight rules colors
 const FLT_COLORS = {
   VFR:  "#00e676", // green
   MVFR: "#1e88e5", // blue
@@ -59,21 +64,14 @@ function clouds(layers){
   return out.join(" ");
 }
 
-// Determine ceiling (ft AGL) from lowest BKN/OVC layer; returns null if none
+// Determine ceiling (ft AGL) from lowest BKN/OVC (or VV)
 function ceilingFt(layers){
   if (!layers || !layers.length) return null;
   let ceil = null;
   for (const L of layers){
     let amt = (L.amount || "").toUpperCase();
-    if (amt==="BROKEN" || amt==="OVERCAST" || amt==="BKN" || amt==="OVC"){
-      const baseM = (L.base && typeof L.base.value==="number") ? L.base.value : null;
-      if (baseM!=null){
-        const ft = baseM / 0.3048;
-        if (ceil==null || ft < ceil) ceil = ft;
-      }
-    }
-    // If NWS ever sends vertical visibility (VV), treat like an overcast ceiling:
-    if (amt==="VV"){
+    const isCeil = (amt==="BROKEN"||amt==="OVERCAST"||amt==="BKN"||amt==="OVC"||amt==="VV");
+    if (isCeil){
       const baseM = (L.base && typeof L.base.value==="number") ? L.base.value : null;
       if (baseM!=null){
         const ft = baseM / 0.3048;
@@ -84,14 +82,8 @@ function ceilingFt(layers){
   return ceil==null ? null : Math.round(ceil);
 }
 
-// Compute FAA flight category: LIFR / IFR / MVFR / VFR
-// Rules:
-//   LIFR: ceil < 500 ft OR vis < 1 sm
-//   IFR:  ceil 500–<1000 OR vis 1–<3 sm
-//   MVFR: ceil 1000–<3000 OR vis 3–<5 sm
-//   VFR:  ceil >=3000 AND vis >=5 sm
+// Flight category rules
 function flightCategory(ceilFt, visSm){
-  // If one is missing, base on the other if available
   const vis = (typeof visSm === "number") ? visSm : null;
   const ceil = (typeof ceilFt === "number") ? ceilFt : null;
 
@@ -123,19 +115,16 @@ function flightCategory(ceilFt, visSm){
   const windDir = wd_raw!=null ? Math.round(wd_raw) : null;
   const windCard = windDir!=null ? toCardinal(windDir) : "";
 
-  // Visibility in statute miles (if reported)
-  // NWS visibility is meters; convert: 1 sm = 1609.34 m
+  // Visibility (meters -> statute miles)
   const visM = p.visibility && typeof p.visibility.value==="number" ? p.visibility.value : null;
   const visSm = visM!=null ? (visM / 1609.34) : null;
 
-  // Clouds and ceiling
+  // Clouds / ceiling / flight category
   const cloudStr = clouds(p.cloudLayers);
   const ceilFeet = ceilingFt(p.cloudLayers);
-
-  // Flight category
   const { cat: fltCat, color: fltColor } = flightCategory(ceilFeet, visSm);
 
-  // Altimeter (barometricPressure preferred; fallback to seaLevelPressure)
+  // Altimeter (barometricPressure preferred; fallback seaLevelPressure)
   let baroPa = null;
   if (p.barometricPressure && typeof p.barometricPressure.value==="number") baroPa = p.barometricPressure.value;
   else if (p.seaLevelPressure && typeof p.seaLevelPressure.value==="number") baroPa = p.seaLevelPressure.value;
@@ -143,26 +132,26 @@ function flightCategory(ceilFt, visSm){
 
   const ts = p.timestamp ? new Date(p.timestamp) : new Date();
 
-  // --- Zulu and CST time ---
+  // Times: Zulu + CST/CDT
   const hh = String(ts.getUTCHours()).padStart(2,"0");
   const mm = String(ts.getUTCMinutes()).padStart(2,"0");
   const zTime = `${hh}:${mm}Z`;
-
   const cstOptions = { timeZone: "America/Chicago", hour12: false, hour: "2-digit", minute: "2-digit" };
   const cstTime = new Intl.DateTimeFormat("en-US", cstOptions).format(ts);
 
   const isCalm = (windKt < 1 || windDir==null);
   const windText = isCalm ? "Calm" : `${windDir}° ${windCard?`(${windCard}) `:""}${Math.round(windKt)} kt`;
 
-  // Runway logic
+  // Runway logic (only if RUNWAYS provided)
   let runwayText = "";
   if (!isCalm && RUNWAYS){
     const [rA, rB] = RUNWAYS.split(",").map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n));
     if (rA && rB){
       const r1 = comps(rA, windDir, windKt);
       const r2 = comps(rB, windDir, windKt);
-      const prefNum = pickRunway(r1, r2) === String(rA).slice(0,2) ? String(rA).slice(0,2) : String(rB).slice(0,2);
-      const r = prefNum===String(rA).slice(0,2) ? r1 : r2;
+      const prefers16 = (pickRunway(r1, r2) === "16"); // compare logic outcome
+      const prefNum = prefers16 ? String(rA).slice(0,2) : String(rB).slice(0,2);
+      const r = prefers16 ? r1 : r2;
       const tail = r.h<0 ? Math.round(Math.abs(r.h)) : 0;
       const xColor = cX(r.x);
       const tColor = cT(tail);
@@ -178,12 +167,12 @@ function flightCategory(ceilFt, visSm){
   const tempColor = cTemp(tempF);
   const windColor = cWind(windKt);
 
-  // Flight rules details text (ceil/vis)
+  // Flight rules text (with details)
   const ceilTxt = (ceilFeet!=null) ? `${Math.round(ceilFeet)} ft` : "—";
-  const visTxt = (visSm!=null) ? `${visSm.toFixed(visSm<10 ? 1 : 0)} sm` : "—";
+  const visTxt  = (visSm!=null)   ? `${visSm.toFixed(visSm<10 ? 1 : 0)} sm` : "—";
   const fltText = `<tspan fill="${fltColor}" font-weight="700">${fltCat}</tspan> <tspan opacity="0.85">(ceil ${ceilTxt}, vis ${visTxt})</tspan>`;
 
-  // ---- Assemble the text line ----
+  // Assemble single line
   const parts = [
     `${STATION} • ${zTime} / ${cstTime} CST`,
     `<tspan fill="#81d4fa">${cloudStr}</tspan>`,
@@ -194,17 +183,32 @@ function flightCategory(ceilFt, visSm){
     runwayText
   ].filter(Boolean);
 
-  // ---- SVG output ----
+  let line = parts.join(" • ");
+
+  // --- Simple auto-fit: if the line is very long, nudge font down and/or widen canvas ---
+  let width = BASE_WIDTH;
+  let fontSize = BASE_FONT;
+  if (line.length > 240) { fontSize = 22; width = Math.max(width, 1800); }
+  if (line.length > 280) { fontSize = 20; width = Math.max(width, 2000); }
+  if (line.length > 320) { fontSize = 18; width = Math.max(width, 2200); }
+
+  // Vertically center text: use dominant-baseline="middle" at y = height/2
+  const height = BASE_HEIGHT;
+  const yMid = Math.round(height / 2);
+
+  // Build SVG (height and viewBox MATCH; rect matches height)
   const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="80" viewBox="0 0 1200 60">
-  <rect x="0" y="0" width="1200" height="80" fill="#000"/>
-  <g font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif" font-size="24" font-weight="600">
-    <text x="12" y="38" fill="#fff">
-      ${parts.join(' • ')}
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve"
+     width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <rect x="0" y="0" width="${width}" height="${height}" fill="#000"/>
+  <g font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif"
+     font-size="${fontSize}" font-weight="600">
+    <text x="12" y="${yMid}" fill="#fff" dominant-baseline="middle">
+      ${line}
     </text>
   </g>
 </svg>`.trim();
 
   fs.writeFileSync(OUTFILE, svg);
-  console.log(`Wrote ${OUTFILE}`);
+  console.log(`Wrote ${OUTFILE} (w=${width}, h=${height}, font=${fontSize}px, chars=${line.length})`);
 })();
