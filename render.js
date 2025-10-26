@@ -1,17 +1,21 @@
-// render.js — build a live SVG for an airport station using NWS API
+// render.js — build a LARGE, two-line SVG for an airport station using NWS API
 // Usage in GH Actions: STATION=KGOK RUNWAYS="160,340" node render.js
 // Node 18+/20+ has global fetch.
 
 const fs = require("fs");
 
 const STATION = (process.env.STATION || "KGOK").toUpperCase();
-const RUNWAYS = (process.env.RUNWAYS || "").trim(); // e.g., "160,340"
+const RUNWAYS = (process.env.RUNWAYS || "").trim(); // "160,340" etc.
 const OUTFILE = `${STATION.toLowerCase()}.svg`;
 
-// ---------- TUNABLE DISPLAY PRESETS ----------
-const BASE_WIDTH  = 1600; // canvas width in px (can auto-widen below)
-const BASE_HEIGHT = 80;   // canvas height in px (matches viewBox)
-const BASE_FONT   = 24;   // default font size for one-line banner
+// ======= DISPLAY PRESETS (tune here) =======
+const CANVAS_WIDTH  = 2000; // px (wide so it doesn't wrap unexpectedly)
+const CANVAS_HEIGHT = 140;  // px  <<— TALLER for readability
+const FONT_SIZE     = 36;   // px  <<— BIGGER text
+const LINE_GAP      = 44;   // px distance between line1 and line2 baselines
+const PADDING_X     = 16;   // px left/right padding
+const PADDING_TOP   = 22;   // px top padding to first baseline
+// ===========================================
 
 // ---- Color helpers ----
 const cTemp = (t) => (t==null) ? "#ffffff"
@@ -21,12 +25,7 @@ const cX = (x) => (x>=15? "#ff5252" : x>=8? "#ffb300" : "#4caf50");
 const cT = (t) => (t>5? "#ff5252" : t>3? "#ffb300" : "#4caf50");
 
 // Flight rules colors
-const FLT_COLORS = {
-  VFR:  "#00e676", // green
-  MVFR: "#1e88e5", // blue
-  IFR:  "#e53935", // red
-  LIFR: "#9c27b0"  // magenta
-};
+const FLT_COLORS = { VFR:"#00e676", MVFR:"#1e88e5", IFR:"#e53935", LIFR:"#9c27b0" };
 
 // ---- Wind + runway math ----
 function toCardinal(deg){
@@ -63,8 +62,6 @@ function clouds(layers){
   }
   return out.join(" ");
 }
-
-// Determine ceiling (ft AGL) from lowest BKN/OVC (or VV)
 function ceilingFt(layers){
   if (!layers || !layers.length) return null;
   let ceil = null;
@@ -81,26 +78,19 @@ function ceilingFt(layers){
   }
   return ceil==null ? null : Math.round(ceil);
 }
-
-// Flight category rules
 function flightCategory(ceilFt, visSm){
   const vis = (typeof visSm === "number") ? visSm : null;
   const ceil = (typeof ceilFt === "number") ? ceilFt : null;
-
   if ((ceil!=null && ceil < 500) || (vis!=null && vis < 1)) return { cat: "LIFR", color: FLT_COLORS.LIFR };
   if ((ceil!=null && ceil < 1000) || (vis!=null && vis < 3)) return { cat: "IFR",  color: FLT_COLORS.IFR  };
   if ((ceil!=null && ceil < 3000) || (vis!=null && vis < 5)) return { cat: "MVFR", color: FLT_COLORS.MVFR };
-  if (ceil==null && vis==null) return { cat: "VFR", color: FLT_COLORS.VFR }; // assume best if nothing reported
+  if (ceil==null && vis==null) return { cat: "VFR", color: FLT_COLORS.VFR };
   return { cat: "VFR", color: FLT_COLORS.VFR };
 }
 
 (async function main(){
   const url = `https://api.weather.gov/stations/${STATION}/observations/latest`;
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": `(airport-station-weather-reports/${STATION}, contact: github.com/jacksonsp117)`
-    }
-  });
+  const res = await fetch(url, { headers: { "User-Agent": `(airport-station-weather-reports/${STATION}, contact: github.com/jacksonsp117)` }});
   const j = await res.json();
   const p = j && j.properties ? j.properties : {};
 
@@ -149,9 +139,9 @@ function flightCategory(ceilFt, visSm){
     if (rA && rB){
       const r1 = comps(rA, windDir, windKt);
       const r2 = comps(rB, windDir, windKt);
-      const prefers16 = (pickRunway(r1, r2) === "16"); // compare logic outcome
-      const prefNum = prefers16 ? String(rA).slice(0,2) : String(rB).slice(0,2);
-      const r = prefers16 ? r1 : r2;
+      const pref16 = (pickRunway(r1, r2) === "16");
+      const prefNum = pref16 ? String(rA).slice(0,2) : String(rB).slice(0,2);
+      const r = pref16 ? r1 : r2;
       const tail = r.h<0 ? Math.round(Math.abs(r.h)) : 0;
       const xColor = cX(r.x);
       const tColor = cT(tail);
@@ -163,7 +153,7 @@ function flightCategory(ceilFt, visSm){
     runwayText = `<tspan fill="#4caf50" font-weight="700">Preferred: Either (calm)</tspan>`;
   }
 
-  // Colors
+  // Colors for temp/wind
   const tempColor = cTemp(tempF);
   const windColor = cWind(windKt);
 
@@ -172,43 +162,37 @@ function flightCategory(ceilFt, visSm){
   const visTxt  = (visSm!=null)   ? `${visSm.toFixed(visSm<10 ? 1 : 0)} sm` : "—";
   const fltText = `<tspan fill="${fltColor}" font-weight="700">${fltCat}</tspan> <tspan opacity="0.85">(ceil ${ceilTxt}, vis ${visTxt})</tspan>`;
 
-  // Assemble single line
-  const parts = [
-    `${STATION} • ${zTime} / ${cstTime} CST`,
+  // ===== Split into two lines for readability =====
+  const partLine1 = [
+    `${STATION}`,
+    `${zTime} / ${cstTime} CST`,
     `<tspan fill="#81d4fa">${cloudStr}</tspan>`,
-    `<tspan fill="${tempColor}">${tempF!=null? tempF : "–"}°F</tspan>`,
+    `<tspan fill="${tempColor}">${tempF!=null? tempF : "–"}°F</tspan>`
+  ].join(" • ");
+
+  const partLine2 = [
     `<tspan fill="${windColor}">Wind ${windText}</tspan>`,
     fltText,
     `Altimeter ${altInHg? altInHg+" inHg" : "—"}`,
     runwayText
-  ].filter(Boolean);
+  ].filter(Boolean).join(" • ");
 
-  let line = parts.join(" • ");
+  // Build SVG (two text lines). Vertically position lines with PADDING_TOP and LINE_GAP.
+  const line1Y = PADDING_TOP + FONT_SIZE;      // first baseline
+  const line2Y = line1Y + LINE_GAP;            // second baseline
 
-  // --- Simple auto-fit: if the line is very long, nudge font down and/or widen canvas ---
-  let width = BASE_WIDTH;
-  let fontSize = BASE_FONT;
-  if (line.length > 240) { fontSize = 22; width = Math.max(width, 1800); }
-  if (line.length > 280) { fontSize = 20; width = Math.max(width, 2000); }
-  if (line.length > 320) { fontSize = 18; width = Math.max(width, 2200); }
-
-  // Vertically center text: use dominant-baseline="middle" at y = height/2
-  const height = BASE_HEIGHT;
-  const yMid = Math.round(height / 2);
-
-  // Build SVG (height and viewBox MATCH; rect matches height)
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve"
-     width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <rect x="0" y="0" width="${width}" height="${height}" fill="#000"/>
-  <g font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif"
-     font-size="${fontSize}" font-weight="600">
-    <text x="12" y="${yMid}" fill="#fff" dominant-baseline="middle">
-      ${line}
-    </text>
+     width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}"
+     viewBox="0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}">
+  <rect x="0" y="0" width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}" fill="#000"/>
+  <g font-family="system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif"
+     font-size="${FONT_SIZE}" font-weight="600" fill="#fff">
+    <text x="${PADDING_X}" y="${line1Y}">${partLine1}</text>
+    <text x="${PADDING_X}" y="${line2Y}">${partLine2}</text>
   </g>
 </svg>`.trim();
 
   fs.writeFileSync(OUTFILE, svg);
-  console.log(`Wrote ${OUTFILE} (w=${width}, h=${height}, font=${fontSize}px, chars=${line.length})`);
+  console.log(`Wrote ${OUTFILE} (w=${CANVAS_WIDTH}, h=${CANVAS_HEIGHT}, font=${FONT_SIZE}px)`);
 })();
