@@ -4,7 +4,7 @@
   <rect x="0" y="0" width="2000" height="140" fill="#000"/>
   <g font-family="system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif"
      font-size="36" font-weight="600" fill="#fff">
-    <text x="16" y="58">KGOK • 15:25Z / 09:25 CST • <tspan fill="#81d4fa">BKN026</tspan> • <tspan fill="#4caf50">66°F</tspan></text>
-    <text x="16" y="102"><tspan fill="#ffb300">Wind 120° (ESE) 14 kt</tspan> • <tspan fill="#1e88e5" font-weight="700">MVFR</tspan> <tspan opacity="0.85">(ceil 2600 ft, vis 3.5 sm)</tspan> • Altimeter 29.98 inHg • <tspan fill="#ffb300" font-weight="700">Preferred: RWY 16</tspan> <tspan opacity="0.85">(HW 11 kt, XW 9 kt)</tspan></text>
+    <text x="16" y="58">KGOK • 15:35Z / 09:35 CST • <tspan fill="#81d4fa">SCT026</tspan> • <tspan fill="#4caf50">66°F</tspan></text>
+    <text x="16" y="102"><tspan fill="#ffb300">Wind 130° (SE) 14 kt</tspan> • <tspan fill="#1e88e5" font-weight="700">MVFR</tspan> <tspan opacity="0.85">(ceil —, vis 4.0 sm)</tspan> • Altimeter 29.97 inHg • <tspan fill="#4caf50" font-weight="700">Preferred: RWY 16</tspan> <tspan opacity="0.85">(HW 12 kt, XW 7 kt)</tspan></text>
   </g>
 </svg>
